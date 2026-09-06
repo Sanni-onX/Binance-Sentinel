@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `idx_one_unresolved_proposal` ON `proposals` (`session_id`) WHERE "proposals"."status" IN ('pending', 'submitting', 'unknown');
