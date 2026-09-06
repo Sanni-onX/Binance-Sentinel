@@ -1,4 +1,4 @@
-export type SymbolName = 'BTCUSDT' | 'BNBUSDT';
+export type SymbolName = string;
 export type DataMode = 'live' | 'demo';
 export interface Candle {
   time: number;
@@ -26,6 +26,8 @@ export interface MarketSnapshot {
   source: string;
   mode: DataMode;
   asOf: string;
+  symbols: SymbolName[];
+  cacheKey?: string;
   assets: MarketAsset[];
 }
 export interface Holding {
@@ -52,6 +54,10 @@ export interface StrategyInput {
   allocation: number;
   feeBps: number;
   slippageBps: number;
+  trendPeriod?: number;
+  stopPct?: number;
+  targetPct?: number;
+  holdingDays?: number;
 }
 export interface Evaluation {
   input: StrategyInput;
@@ -68,6 +74,8 @@ export interface Evaluation {
   curve: { time: number; strategy: number; benchmark: number }[];
   verdict: string;
   assumptions: string[];
+  closedTrades?: number;
+  wins?: number;
 }
 export interface SavedReport {
   id: string;

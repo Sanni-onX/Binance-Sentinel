@@ -31,6 +31,29 @@ const candleSchema = z
   ])
   .rest(z.unknown());
 const DATA_ORIGIN = 'https://data-api.binance.vision';
+export const DEFAULT_SYMBOLS = ['BTCUSDT', 'BNBUSDT'];
+export const MAX_TRACKED_SYMBOLS = 8;
+export function normalizeSymbols(input?: string[] | string | null) {
+  const raw = Array.isArray(input)
+    ? input
+    : typeof input === 'string'
+      ? input.split(',')
+      : [];
+  const symbols = raw
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean)
+    .map((s) => (s.endsWith('USDT') ? s : `${s}USDT`));
+  const unique = [...new Set(symbols.length ? symbols : DEFAULT_SYMBOLS)];
+  if (unique.length > MAX_TRACKED_SYMBOLS)
+    throw new Error(`Track at most ${MAX_TRACKED_SYMBOLS} pairs at once.`);
+  for (const symbol of unique) {
+    if (!/^[A-Z0-9]{2,20}USDT$/.test(symbol))
+      throw new Error(
+        'Tracked pairs must be Binance-style USDT symbols, such as BTCUSDT or ETHUSDT.',
+      );
+  }
+  return unique;
+}
 export async function binancePublic(
   path: string,
   query: Record<string, string> = {},
@@ -46,7 +69,18 @@ export async function binancePublic(
 }
 export function sampleCandles(symbol: SymbolName, count = 231): Candle[] {
   const end = Date.UTC(2026, 8, 4);
-  const base = symbol === 'BTCUSDT' ? 68000 : 580;
+  const bases: Record<string, number> = {
+    BTCUSDT: 68000,
+    BNBUSDT: 580,
+    ETHUSDT: 3600,
+    SOLUSDT: 160,
+    XRPUSDT: 0.62,
+    ADAUSDT: 0.48,
+    DOGEUSDT: 0.12,
+  };
+  let hash = 0;
+  for (let i = 0; i < symbol.length; i++) hash += symbol.charCodeAt(i);
+  const base = bases[symbol] ?? 10 + (hash % 500);
   let price = base;
   return Array.from({ length: 231 }, (_, i) => {
     const open = price;
@@ -133,11 +167,19 @@ export function analyzeAsset(
 let cached: { at: number; value: MarketSnapshot } | undefined;
 export async function getMarket(
   mode: DataMode = 'live',
+  requestedSymbols?: string[] | string | null,
 ): Promise<MarketSnapshot> {
-  if (mode === 'live' && cached && Date.now() - cached.at < 30000)
+  const symbols = normalizeSymbols(requestedSymbols);
+  const cacheKey = `${mode}:${symbols.join(',')}`;
+  if (
+    mode === 'live' &&
+    cached &&
+    cached.value.cacheKey === cacheKey &&
+    Date.now() - cached.at < 30000
+  )
     return cached.value;
   const assets = await Promise.all(
-    (['BTCUSDT', 'BNBUSDT'] as const).map(async (symbol) => {
+    symbols.map(async (symbol) => {
       const [candles, raw] = await Promise.all([
         getCandles(symbol, 230, mode),
         mode === 'live'
@@ -175,6 +217,8 @@ export async function getMarket(
   const value = {
     assets,
     mode,
+    symbols,
+    cacheKey,
     source:
       mode === 'live' ? 'Binance public Spot API' : 'Synthetic sample data',
     asOf:

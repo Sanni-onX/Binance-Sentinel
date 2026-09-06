@@ -1,4 +1,5 @@
 'use client';
+import { StrategyDevelopment } from './strategy-development';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Activity,
@@ -21,6 +22,7 @@ import {
   ShieldCheck,
   Unplug,
   Wallet,
+  X,
 } from 'lucide-react';
 import {
   Area,
@@ -90,6 +92,31 @@ const colors = [
   '#7c9682',
   '#848992',
 ];
+const DEFAULT_TRACKED_SYMBOLS = ['BTCUSDT', 'BNBUSDT'];
+const MAX_TRACKED_SYMBOLS = 8;
+const pairLabel = (symbol: string) => symbol.replace(/USDT$/, '');
+function normalizePair(input: string) {
+  const pair = input.trim().toUpperCase();
+  if (!pair) return '';
+  return pair.endsWith('USDT') ? pair : `${pair}USDT`;
+}
+function loadTrackedSymbols() {
+  if (typeof window === 'undefined') return DEFAULT_TRACKED_SYMBOLS;
+  const saved = localStorage.getItem('sentinel:tracked-symbols');
+  if (!saved) return DEFAULT_TRACKED_SYMBOLS;
+  try {
+    const parsed = JSON.parse(saved);
+    if (!Array.isArray(parsed)) return DEFAULT_TRACKED_SYMBOLS;
+    const next = parsed
+      .filter((s): s is string => typeof s === 'string')
+      .map(normalizePair)
+      .filter(Boolean)
+      .slice(0, MAX_TRACKED_SYMBOLS);
+    return next.length ? [...new Set(next)] : DEFAULT_TRACKED_SYMBOLS;
+  } catch {
+    return DEFAULT_TRACKED_SYMBOLS;
+  }
+}
 async function api<T>(path: string, body?: unknown): Promise<T> {
   const response = await fetch(`/api/${path}`, {
     method: body === undefined ? 'GET' : 'POST',
@@ -180,6 +207,8 @@ export default function SentinelDashboard() {
   const [mode, setMode] = useState<DataMode>('live');
   const [ready, setReady] = useState(false);
   const [market, setMarket] = useState<MarketSnapshot | null>(null);
+  const [trackedSymbols, setTrackedSymbols] = useState(loadTrackedSymbols);
+  const [pairInput, setPairInput] = useState('');
   const [marketError, setMarketError] = useState('');
   const [loadingMarket, setLoadingMarket] = useState(true);
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
@@ -244,7 +273,11 @@ export default function SentinelDashboard() {
     setMarket((previous) => (previous?.mode === mode ? previous : null));
     setMarketError('');
     try {
-      const result = await api<MarketSnapshot>(`market?mode=${mode}`);
+      const params = new URLSearchParams({
+        mode,
+        symbols: trackedSymbols.join(','),
+      });
+      const result = await api<MarketSnapshot>(`market?${params.toString()}`);
       if (token === generation.current) setMarket(result);
     } catch (e) {
       if (token === generation.current) {
@@ -256,7 +289,32 @@ export default function SentinelDashboard() {
     } finally {
       if (token === generation.current) setLoadingMarket(false);
     }
-  }, [mode]);
+  }, [mode, trackedSymbols]);
+  const addTrackedPair = () => {
+    const symbol = normalizePair(pairInput);
+    if (!symbol) return;
+    if (!/^[A-Z0-9]{2,20}USDT$/.test(symbol)) {
+      setNotice('Use a Binance USDT pair such as ETH or SOLUSDT.');
+      return;
+    }
+    if (trackedSymbols.includes(symbol)) {
+      setPairInput('');
+      return;
+    }
+    if (trackedSymbols.length >= MAX_TRACKED_SYMBOLS) {
+      setNotice(`Track at most ${MAX_TRACKED_SYMBOLS} pairs at once.`);
+      return;
+    }
+    setTrackedSymbols((current) => [...current, symbol]);
+    setPairInput('');
+  };
+  const removeTrackedPair = (symbol: string) => {
+    if (trackedSymbols.length <= 1) return;
+    const next = trackedSymbols.filter((s) => s !== symbol);
+    setTrackedSymbols(next);
+    if (strategy.symbol === symbol)
+      setStrategy((current) => ({ ...current, symbol: next[0] }));
+  };
   const task = async (name: string, fn: () => Promise<void>) => {
     if (busyRef.current) return;
     busyRef.current = true;
@@ -310,6 +368,12 @@ export default function SentinelDashboard() {
       active = false;
     };
   }, [loadRecords]);
+  useEffect(() => {
+    localStorage.setItem(
+      'sentinel:tracked-symbols',
+      JSON.stringify(trackedSymbols),
+    );
+  }, [trackedSymbols]);
   const invalidateMarket = useCallback(() => {
     generation.current++;
   }, []);
@@ -328,7 +392,10 @@ export default function SentinelDashboard() {
   }, [ready, refreshMarket, invalidateMarket]);
   const generateReport = async () => {
     await task('report', async () => {
-      const r = await api<SavedReport>('reports/generate', { mode });
+      const r = await api<SavedReport>('reports/generate', {
+        mode,
+        symbols: trackedSymbols,
+      });
       setSelectedReport(r);
       await loadRecords();
       navigate('Reports');
@@ -350,7 +417,7 @@ export default function SentinelDashboard() {
       setChatOpen(true);
       const result = await api<{ answer: string; engine: string }>(
         'agent/ask',
-        { message: value, mode },
+        { message: value, mode, symbols: trackedSymbols },
       );
       setChat((c) => [...c, { message: value, ...result }]);
       setMessage('');
@@ -407,21 +474,17 @@ export default function SentinelDashboard() {
     ).catch(() => {});
     return () => lifecycle.abort();
   }, [navigate]);
-  const btc = market?.assets[0],
-    bnb = market?.assets[1];
+  const primaryAssets = market?.assets.slice(0, 4) || [];
   const activeEvaluation = evaluation;
   const chart =
-    market?.assets[0].candles.slice(-chartDays).map((c, i) => ({
-      time: c.time,
-      BTC:
-        (c.close / market.assets[0].candles.slice(-chartDays)[0].close - 1) *
-        100,
-      BNB:
-        (market.assets[1].candles.slice(-chartDays)[i].close /
-          market.assets[1].candles.slice(-chartDays)[0].close -
-          1) *
-        100,
-    })) || [];
+    primaryAssets[0]?.candles.slice(-chartDays).map((c, i) => {
+      const point: Record<string, number> = { time: c.time };
+      for (const asset of primaryAssets) {
+        const candles = asset.candles.slice(-chartDays);
+        point[asset.symbol] = (candles[i].close / candles[0].close - 1) * 100;
+      }
+      return point;
+    }) || [];
   const headline = market
     ? market.assets.every((a) => a.trend === 'Rising')
       ? 'Momentum is building. Stay selective.'
@@ -540,7 +603,7 @@ export default function SentinelDashboard() {
               </h1>
               <p className="subtle">
                 {view === 'Overview'
-                  ? 'BTC, BNB and your portfolio.'
+                  ? 'Tracked pairs and your portfolio.'
                   : view === 'Portfolio'
                     ? 'Actual balances from your Agentic spot account.'
                     : view === 'Strategy lab'
@@ -621,6 +684,42 @@ export default function SentinelDashboard() {
                   : 'No market snapshot'}
             </span>
           </div>
+          <form
+            className="pair-toolbar"
+            onSubmit={(e) => {
+              e.preventDefault();
+              addTrackedPair();
+            }}
+          >
+            <div className="tracked-pairs" aria-label="Tracked market pairs">
+              {trackedSymbols.map((symbol) => (
+                <span className="pair-chip" key={symbol}>
+                  {pairLabel(symbol)}
+                  <button
+                    type="button"
+                    title={`Remove ${symbol}`}
+                    aria-label={`Remove ${symbol}`}
+                    disabled={trackedSymbols.length <= 1}
+                    onClick={() => removeTrackedPair(symbol)}
+                  >
+                    <X size={13} />
+                  </button>
+                </span>
+              ))}
+            </div>
+            <label htmlFor="tracked-pair-input" className="pair-input">
+              <Input
+                id="tracked-pair-input"
+                value={pairInput}
+                onChange={(e) => setPairInput(e.target.value)}
+                placeholder="Add pair, e.g. ETH"
+                maxLength={20}
+              />
+            </label>
+            <Button type="submit" variant="outline" disabled={!pairInput.trim()}>
+              Add pair
+            </Button>
+          </form>
           {marketError && (
             <div className="notice" role="alert">
               <Activity size={17} />
@@ -637,22 +736,22 @@ export default function SentinelDashboard() {
           {view === 'Overview' && (
             <>
               <div className="metric-grid">
-                <Metric
-                  label="Bitcoin / BTC"
-                  value={btc ? money(btc.price) : '--'}
-                  detail={
-                    btc ? `${pct(btc.change)} past 24h` : 'Awaiting market data'
-                  }
-                  positive={btc ? btc.change >= 0 : undefined}
-                />
-                <Metric
-                  label="BNB / BNB"
-                  value={bnb ? money(bnb.price) : '--'}
-                  detail={
-                    bnb ? `${pct(bnb.change)} past 24h` : 'Awaiting market data'
-                  }
-                  positive={bnb ? bnb.change >= 0 : undefined}
-                />
+                {trackedSymbols.slice(0, 2).map((symbol) => {
+                  const asset = market?.assets.find((a) => a.symbol === symbol);
+                  return (
+                    <Metric
+                      key={symbol}
+                      label={`${pairLabel(symbol)} / USDT`}
+                      value={asset ? money(asset.price) : '--'}
+                      detail={
+                        asset
+                          ? `${pct(asset.change)} past 24h`
+                          : 'Awaiting market data'
+                      }
+                      positive={asset ? asset.change >= 0 : undefined}
+                    />
+                  );
+                })}
                 <Metric
                   label="Portfolio value / USDT"
                   value={portfolio ? money(portfolio.total) : '--'}
@@ -694,10 +793,12 @@ export default function SentinelDashboard() {
                     <>
                       <ChartContainer
                         className="performance-chart"
-                        config={{
-                          BTC: { label: 'BTC', color: colors[0] },
-                          BNB: { label: 'BNB', color: colors[1] },
-                        }}
+                        config={Object.fromEntries(
+                          primaryAssets.map((a, i) => [
+                            a.symbol,
+                            { label: pairLabel(a.symbol), color: colors[i] },
+                          ]),
+                        )}
                       >
                         <ComposedChart
                           data={chart}
@@ -735,33 +836,26 @@ export default function SentinelDashboard() {
                               />
                             }
                           />
-                          <Line
-                            type="linear"
-                            dataKey="BTC"
-                            stroke={colors[0]}
-                            strokeWidth={2}
-                            dot={false}
-                            isAnimationActive={false}
-                          />
-                          <Line
-                            type="linear"
-                            dataKey="BNB"
-                            stroke={colors[1]}
-                            strokeWidth={2}
-                            dot={false}
-                            isAnimationActive={false}
-                          />
+                          {primaryAssets.map((asset, i) => (
+                            <Line
+                              key={asset.symbol}
+                              type="linear"
+                              dataKey={asset.symbol}
+                              stroke={colors[i]}
+                              strokeWidth={2}
+                              dot={false}
+                              isAnimationActive={false}
+                            />
+                          ))}
                         </ComposedChart>
                       </ChartContainer>
                       <div className="chart-legend">
-                        <span>
-                          <i style={{ background: colors[0] }} />
-                          Bitcoin
-                        </span>
-                        <span>
-                          <i style={{ background: colors[1] }} />
-                          BNB
-                        </span>
+                        {primaryAssets.map((asset, i) => (
+                          <span key={asset.symbol}>
+                            <i style={{ background: colors[i] }} />
+                            {pairLabel(asset.symbol)}
+                          </span>
+                        ))}
                         <span className="legend-note">
                           Closed daily candles /{' '}
                           {mode === 'demo'
@@ -777,7 +871,7 @@ export default function SentinelDashboard() {
                           ? 'Fetching market data'
                           : 'Market data unavailable'
                       }
-                      detail="BTC / BNB daily price performance"
+                      detail="Tracked pair daily price performance"
                     />
                   )}
                 </section>
@@ -792,7 +886,7 @@ export default function SentinelDashboard() {
                   <h2>{headline}</h2>
                   <p className="subtle">
                     {market
-                      ? `${btc?.symbol.replace('USDT', '')} is ${btc?.trend.toLowerCase()}, while BNB is ${bnb?.trend.toLowerCase()}. Review momentum alongside existing exposure before adding a position.`
+                      ? `${primaryAssets.map((a) => `${pairLabel(a.symbol)} is ${a.trend.toLowerCase()}`).join(', ')}. Review momentum alongside existing exposure before adding a position.`
                       : 'Your brief will appear when market data is available.'}
                   </p>
                   <div className="brief-check">
@@ -807,7 +901,7 @@ export default function SentinelDashboard() {
                     disabled={!market || Boolean(busy)}
                     onClick={() =>
                       void ask(
-                        'Analyze BTC and BNB market changes and implications for a conservative portfolio.',
+                        `Analyze ${trackedSymbols.map(pairLabel).join(', ')} market changes and implications for a conservative portfolio.`,
                       )
                     }
                   >
@@ -818,7 +912,10 @@ export default function SentinelDashboard() {
               <section className="watchlist">
                 <div className="section-heading">
                   <h2>
-                    Market watchlist <span className="count">02</span>
+                    Market watchlist{' '}
+                    <span className="count">
+                      {String(trackedSymbols.length).padStart(2, '0')}
+                    </span>
                   </h2>
                   <span className="muted-text">USDT quoted / 24h</span>
                 </div>
@@ -840,10 +937,10 @@ export default function SentinelDashboard() {
                           <td aria-label={a.symbol}>
                             <div className="asset-cell">
                               <span className={`coin coin-${i}`}>
-                                {i === 0 ? 'B' : 'N'}
+                                {pairLabel(a.symbol).slice(0, 2)}
                               </span>
                               <span>
-                                {i === 0 ? 'Bitcoin' : 'BNB'}
+                                {pairLabel(a.symbol)}
                                 <small>{a.symbol}</small>
                               </span>
                             </div>
@@ -1126,6 +1223,7 @@ export default function SentinelDashboard() {
           )}
           {view === 'Strategy lab' && (
             <>
+              <StrategyDevelopment mode={mode} symbols={trackedSymbols} ready={ready} request={api}/>
               <div className="strategy-layout">
                 <form
                   className="strategy-controls"
@@ -1147,8 +1245,11 @@ export default function SentinelDashboard() {
                         })
                       }
                     >
-                      <option value="BTCUSDT">Bitcoin / USDT</option>
-                      <option value="BNBUSDT">BNB / USDT</option>
+                      {trackedSymbols.map((symbol) => (
+                        <option value={symbol} key={symbol}>
+                          {pairLabel(symbol)} / USDT
+                        </option>
+                      ))}
                     </NativeSelect>
                   </label>
                   <label htmlFor="strategy-type">
@@ -1824,7 +1925,7 @@ export default function SentinelDashboard() {
                 <h2>What needs a closer look?</h2>
                 <div className="suggestions">
                   {[
-                    'Analyze BTC and BNB',
+                    `Analyze ${trackedSymbols.map(pairLabel).join(', ')}`,
                     'Review my portfolio exposure',
                     'Develop a conservative strategy',
                   ].map((s) => (

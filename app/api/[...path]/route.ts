@@ -12,6 +12,11 @@ import { audit, database, listRecords, saveRecord, setting } from '@/lib/store';
 import { getMarket, getCandles } from '@/lib/market';
 import { evaluateStrategy, strategySchema } from '@/lib/strategy';
 import {
+  calculateOutcome,
+  developStrategy,
+  researchSchema,
+} from '@/lib/strategy-research';
+import {
   beginAuthorization,
   finishAuthorization,
   hasToken,
@@ -23,6 +28,12 @@ import { askAgent } from '@/lib/agent';
 import { confirmOrder, stageOrder } from '@/lib/orders';
 import type { Portfolio } from '@/lib/types';
 const modeSchema = z.enum(['live', 'demo']).default('live');
+const symbolsFromUrl = (url: URL) => url.searchParams.get('symbols');
+const symbolsFromBody = (body: unknown) =>
+  z
+    .object({ symbols: z.array(z.string()).max(8).optional() })
+    .loose()
+    .parse(body).symbols;
 const route = (req: Request) =>
   new URL(req.url).pathname.replace(/^\/api\//, '').replace(/\/$/, '');
 export async function GET(request: Request) {
@@ -64,12 +75,23 @@ export async function GET(request: Request) {
       return json(
         await getMarket(
           modeSchema.parse(url.searchParams.get('mode') || undefined),
+          symbolsFromUrl(url),
         ),
         200,
         session.cookie,
       );
     if (path === 'reports')
       return json(await listRecords(session.id, 'report'), 200, session.cookie);
+    if (path === 'strategies' || path === 'strategy/outcomes')
+      return json(
+        await listRecords(
+          session.id,
+          path === 'strategies' ? 'strategy' : 'strategy-outcome',
+          200,
+        ),
+        200,
+        session.cookie,
+      );
     if (path === 'evaluations')
       return json(
         await listRecords(session.id, 'evaluation', 10),
@@ -159,6 +181,47 @@ export async function POST(request: Request) {
     const session = await getSession(request);
     const path = route(request);
     const body = await readJson(request);
+    if (path === 'strategy/develop') {
+      const input = researchSchema.parse(body);
+      const mode = modeSchema.parse(body.mode);
+      const candles = await getCandles(input.symbol, input.days + 50, mode);
+      const result = await saveRecord(
+        session.id,
+        'strategy',
+        developStrategy(input, candles, mode),
+      );
+      await audit(
+        session.id,
+        'Strategy developed',
+        `${input.symbol}: development and held-out validation (${mode}).`,
+      );
+      return json(result);
+    }
+    if (path === 'strategy/outcomes') {
+      const outcome = calculateOutcome(body);
+      const owned = await database()
+        .prepare(
+          "SELECT payload FROM records WHERE id = ? AND session_id = ? AND kind = 'strategy'",
+        )
+        .bind(outcome.strategyId, session.id)
+        .first<{ payload: string }>();
+      if (!owned) throw new HttpError(404, 'Strategy not found.');
+      if (
+        JSON.parse(owned.payload).mode === 'demo' &&
+        outcome.execution === 'actual'
+      )
+        throw new HttpError(
+          400,
+          'Sample strategies can only have paper outcomes.',
+        );
+      const saved = await saveRecord(session.id, 'strategy-outcome', outcome);
+      await audit(
+        session.id,
+        'Strategy outcome recorded',
+        `${outcome.execution} result, manually reported.`,
+      );
+      return json(saved);
+    }
     if (path === 'binance/connect')
       return json(await beginAuthorization(session.id, trustedOrigin(request)));
     if (path === 'binance/disconnect') {
@@ -190,7 +253,7 @@ export async function POST(request: Request) {
     }
     if (path === 'reports/generate') {
       const mode = modeSchema.parse(body.mode);
-      const market = await getMarket(mode);
+      const market = await getMarket(mode, symbolsFromBody(body));
       let portfolio: Portfolio | null = null;
       if (mode === 'live' && (await hasToken(session.id)))
         portfolio = await getPortfolio(session.id, trustedOrigin(request));
@@ -202,21 +265,24 @@ export async function POST(request: Request) {
       await audit(
         session.id,
         'Report generated',
-        `BTC, BNB and available portfolio data (${mode}).`,
+        `Tracked market pairs and available portfolio data (${mode}).`,
       );
       return json(saved);
     }
     if (path === 'agent/ask') {
-      const { message, mode } = z
+      const { message, mode, symbols } = z
         .object({
           message: z.string().trim().min(1).max(2000),
           mode: modeSchema,
+          symbols: z.array(z.string()).max(8).optional(),
         })
         .parse(body);
       let portfolio: Portfolio | null = null;
       if (mode === 'live' && (await hasToken(session.id)))
         portfolio = await getPortfolio(session.id, trustedOrigin(request));
-      return json(await askAgent(session.id, message, mode, portfolio));
+      return json(
+        await askAgent(session.id, message, mode, portfolio, symbols),
+      );
     }
     if (path === 'orders/stage')
       return json(await stageOrder(session.id, trustedOrigin(request), body));

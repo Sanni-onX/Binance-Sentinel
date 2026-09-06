@@ -2,13 +2,21 @@ import { z } from 'zod';
 import { SMA } from 'technicalindicators';
 import type { Candle, DataMode, Evaluation, StrategyInput } from './types';
 export const strategySchema = z.object({
-  symbol: z.enum(['BTCUSDT', 'BNBUSDT']),
+  symbol: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z0-9]{2,20}USDT$/, 'Use a Binance USDT pair.'),
   strategy: z.enum(['trend', 'dca', 'hold']),
   days: z.number().int().min(30).max(180),
   capital: z.number().min(10).max(10000000),
   allocation: z.number().min(5).max(80),
   feeBps: z.number().min(0).max(100),
   slippageBps: z.number().min(0).max(100),
+  trendPeriod: z.number().int().min(10).max(50).optional(),
+  stopPct: z.number().min(1).max(20).optional(),
+  targetPct: z.number().min(1).max(50).optional(),
+  holdingDays: z.number().int().min(1).max(30).optional(),
 });
 
 export function evaluateStrategy(
@@ -35,7 +43,8 @@ export function evaluateStrategy(
     throw new Error('Invalid or unsorted market candles.');
   const start = candles.length - input.days;
   const closes = candles.map((c) => c.close);
-  const averages = SMA.calculate({ period: 50, values: closes });
+  const period = input.trendPeriod ?? 50;
+  const averages = SMA.calculate({ period, values: closes });
   const fee = input.feeBps / 10000,
     slip = input.slippageBps / 10000,
     allocation = input.allocation / 100;
@@ -45,6 +54,11 @@ export function evaluateStrategy(
     trades = 0,
     peak = input.capital,
     drawdown = 0;
+  let entry = 0,
+    entryIndex = 0,
+    entryCost = 0,
+    closedTrades = 0,
+    wins = 0;
   const budget = input.capital * allocation;
   const benchmarkUnits =
     budget / (candles[start].open * (1 + slip) * (1 + fee));
@@ -62,6 +76,8 @@ export function evaluateStrategy(
     units += net / (price * (1 + slip));
     fees += spend - net;
     cash -= spend;
+    entryCost += spend;
+    entry = price;
     trades++;
   };
   const sell = (price: number) => {
@@ -69,6 +85,9 @@ export function evaluateStrategy(
     const gross = units * price * (1 - slip);
     fees += gross * fee;
     cash += gross * (1 - fee);
+    closedTrades++;
+    if (gross * (1 - fee) > entryCost) wins++;
+    entryCost = 0;
     units = 0;
     trades++;
   };
@@ -79,9 +98,32 @@ export function evaluateStrategy(
     if (input.strategy === 'dca' && (i - start) % 7 === 0)
       buy(budget / Math.ceil(input.days / 7), c.open);
     if (input.strategy === 'trend') {
-      const trend = closes[i - 1] > averages[i - 50];
-      if (trend && units === 0) buy(cash * allocation, c.open);
-      else if (!trend) sell(c.open);
+      const trend = closes[i - 1] > averages[i - period];
+      let exited = false;
+      if (
+        units > 0 &&
+        (!trend || (input.holdingDays && i - entryIndex >= input.holdingDays))
+      ) {
+        sell(c.open);
+        exited = true;
+      }
+      if (trend && units === 0 && !exited) {
+        buy(cash * allocation, c.open);
+        entryIndex = i;
+      }
+      // If a daily candle touches both exits, assume the stop filled first.
+      if (
+        units > 0 &&
+        input.stopPct &&
+        c.low <= entry * (1 - input.stopPct / 100)
+      )
+        sell(Math.min(c.open, entry * (1 - input.stopPct / 100)));
+      else if (
+        units > 0 &&
+        input.targetPct &&
+        c.high >= entry * (1 + input.targetPct / 100)
+      )
+        sell(entry * (1 + input.targetPct / 100));
     }
     const value = cash + units * c.close;
     peak = Math.max(peak, value);
@@ -115,6 +157,8 @@ export function evaluateStrategy(
     sharpe: sd > 1e-12 ? (mean / sd) * Math.sqrt(365) : null,
     fees,
     trades,
+    closedTrades,
+    wins,
     finalValue,
     curve,
     verdict:
@@ -124,6 +168,11 @@ export function evaluateStrategy(
           ? 'Negative historical return. Keep this strategy under review.'
           : 'Within the drawdown review threshold for this sample. Forward testing required.',
     assumptions: [
+      ...(input.stopPct
+        ? [
+            'Stops include adverse opening gaps; if stop and target are touched in one candle, stop takes precedence. Targets fill at the target price.',
+          ]
+        : []),
       'Signals use prior closed candles; orders fill at the next daily open.',
       'Benchmark uses the same starting allocation, entry fees and slippage.',
       'Uninvested cash earns no interest. Open positions are marked to market without a final liquidation.',
