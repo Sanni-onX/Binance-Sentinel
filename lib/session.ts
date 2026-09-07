@@ -11,12 +11,31 @@ export function configuredOrigin() {
   }
   return undefined;
 }
+function headerValue(request: Request, name: string) {
+  return request.headers.get(name)?.split(',')[0]?.trim();
+}
+function requestOrigin(request: Request) {
+  const current = new URL(request.url);
+  const forwardedProto = headerValue(request, 'x-forwarded-proto');
+  const forwardedHost = headerValue(request, 'x-forwarded-host');
+  if (forwardedProto === 'https' && forwardedHost)
+    return `https://${forwardedHost}`;
+  return current.origin;
+}
+function isSecureRequest(request: Request) {
+  return (
+    new URL(request.url).protocol === 'https:' ||
+    headerValue(request, 'x-forwarded-proto') === 'https'
+  );
+}
 export function trustedOrigin(request: Request) {
   const origin = configuredOrigin();
   const current = new URL(request.url);
   if (origin) return origin;
   if (['localhost', '127.0.0.1'].includes(current.hostname))
     return current.origin;
+  const inferred = requestOrigin(request);
+  if (inferred.startsWith('https://')) return inferred;
   throw new HttpError(503, 'Set APP_ORIGIN to the deployed app origin.');
 }
 export function checkMutation(request: Request) {
@@ -53,7 +72,7 @@ export async function getSession(
     )
     .bind(id, Date.now(), Date.now() + 7 * 86400000)
     .run();
-  const secure = new URL(request.url).protocol === 'https:';
+  const secure = isSecureRequest(request);
   return {
     id,
     cookie: `sentinel_session=${id}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800${secure ? '; Secure' : ''}`,
