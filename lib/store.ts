@@ -1,7 +1,40 @@
 import { env } from 'cloudflare:workers';
+let schemaReady: Promise<void> | undefined;
 export function database() {
   if (!env.DB) throw new Error('Database unavailable.');
   return env.DB;
+}
+export async function ensureSchema() {
+  schemaReady ??= database()
+    .batch([
+      database()
+        .prepare(
+          'CREATE TABLE IF NOT EXISTS proposals (id text PRIMARY KEY NOT NULL, session_id text NOT NULL, payload text NOT NULL, status text NOT NULL, expires_at integer NOT NULL, result text)',
+        )
+        .bind(),
+      database()
+        .prepare(
+          'CREATE TABLE IF NOT EXISTS records (id text PRIMARY KEY NOT NULL, session_id text NOT NULL, kind text NOT NULL, payload text NOT NULL, created_at integer NOT NULL)',
+        )
+        .bind(),
+      database()
+        .prepare(
+          'CREATE INDEX IF NOT EXISTS idx_records_session_kind_created ON records (session_id, kind, created_at)',
+        )
+        .bind(),
+      database()
+        .prepare(
+          'CREATE TABLE IF NOT EXISTS sessions (id text PRIMARY KEY NOT NULL, created_at integer NOT NULL, expires_at integer NOT NULL, oauth text, oauth_state text, oauth_expires integer)',
+        )
+        .bind(),
+      database()
+        .prepare(
+          "CREATE UNIQUE INDEX IF NOT EXISTS idx_one_unresolved_proposal ON proposals (session_id) WHERE status IN ('pending', 'submitting', 'unknown')",
+        )
+        .bind(),
+    ])
+    .then(() => undefined);
+  await schemaReady;
 }
 export function setting(name: string): string | undefined {
   return (env as unknown as Record<string, string>)[name] || process.env[name];

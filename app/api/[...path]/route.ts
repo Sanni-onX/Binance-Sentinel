@@ -11,6 +11,7 @@ import {
 import {
   audit,
   database,
+  ensureSchema,
   listRecords,
   openAiConfig,
   saveRecord,
@@ -83,6 +84,7 @@ export async function GET(request: Request) {
         token_endpoint_auth_method: 'none',
       });
     }
+    await ensureSchema();
     const session = await getSession(request, true);
     if (path === 'session') {
       const ai = openAiConfig(),
@@ -208,6 +210,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     checkMutation(request);
+    await ensureSchema();
     const session = await getSession(request);
     const path = route(request);
     const body = await readJson(request);

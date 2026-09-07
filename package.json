@@ -10,6 +10,7 @@
     "build": "vinext build",
     "postbuild": "node scripts/verify-artifact.mjs",
     "start": "wrangler dev --config dist/server/wrangler.json",
+    "start:railway": "node scripts/railway-start.mjs",
     "lint": "oxlint",
     "format": "oxfmt",
     "db:generate": "drizzle-kit generate",
