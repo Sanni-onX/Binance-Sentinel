@@ -6,6 +6,30 @@ export function database() {
 export function setting(name: string): string | undefined {
   return (env as unknown as Record<string, string>)[name] || process.env[name];
 }
+export function firstSetting(names: string[]): string | undefined {
+  return names.map(setting).find(Boolean);
+}
+export function openAiConfig() {
+  const key = firstSetting(['OPENAI_API_KEY', 'OPENAI_KEY']);
+  const model = firstSetting([
+    'OPENAI_MODEL',
+    'OPENAI_API_MODEL',
+    'OPENAI_RESPONSES_MODEL',
+    'MODEL',
+  ]);
+  return {
+    key,
+    model,
+    configured: Boolean(key && model),
+    status: key
+      ? model
+        ? `AI analyst / ${model}`
+        : 'OpenAI key found, model missing'
+      : model
+        ? 'OpenAI model found, key missing'
+        : 'OpenAI key and model missing',
+  };
+}
 export async function saveRecord(
   sessionId: string,
   kind: string,

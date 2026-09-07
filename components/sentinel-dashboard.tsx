@@ -217,7 +217,10 @@ export default function SentinelDashboard() {
     tokenPresent: false,
     tools: [],
     aiConfigured: false,
+    aiStatus: 'OpenAI key and model missing',
     oauthReady: false,
+    oauthMode: 'local_only',
+    oauthStatus: 'Needs public HTTPS metadata',
   });
   const [tradingEnabled, setTradingEnabled] = useState(false);
   const [reports, setReports] = useState<SavedReport[]>([]);
@@ -336,15 +339,21 @@ export default function SentinelDashboard() {
       try {
         const session = await api<{
           aiConfigured: boolean;
+          aiStatus?: string;
           tradingEnabled: boolean;
           oauthReady: boolean;
+          oauthMode?: string;
+          oauthStatus?: string;
         }>('session');
         if (!active) return;
         if (navigation.some(([n]) => n === initial)) setView(initial as View);
         setConnection((c) => ({
           ...c,
           aiConfigured: session.aiConfigured,
+          aiStatus: session.aiStatus,
           oauthReady: session.oauthReady,
+          oauthMode: session.oauthMode,
+          oauthStatus: session.oauthStatus,
         }));
         setTradingEnabled(session.tradingEnabled);
         setReady(true);
@@ -531,7 +540,7 @@ export default function SentinelDashboard() {
             <small>
               {connection.aiConfigured
                 ? 'AI connected'
-                : 'Structured analytics'}
+                : connection.aiStatus || 'Structured analytics'}
             </small>
           </span>
           <button
@@ -716,7 +725,11 @@ export default function SentinelDashboard() {
                 maxLength={20}
               />
             </label>
-            <Button type="submit" variant="outline" disabled={!pairInput.trim()}>
+            <Button
+              type="submit"
+              variant="outline"
+              disabled={!pairInput.trim()}
+            >
               Add pair
             </Button>
           </form>
@@ -1223,7 +1236,12 @@ export default function SentinelDashboard() {
           )}
           {view === 'Strategy lab' && (
             <>
-              <StrategyDevelopment mode={mode} symbols={trackedSymbols} ready={ready} request={api}/>
+              <StrategyDevelopment
+                mode={mode}
+                symbols={trackedSymbols}
+                ready={ready}
+                request={api}
+              />
               <div className="strategy-layout">
                 <form
                   className="strategy-controls"
@@ -1694,7 +1712,7 @@ export default function SentinelDashboard() {
                     <strong>
                       {connection.connected
                         ? 'Authorized tools available'
-                        : 'Authorization required'}
+                        : connection.oauthStatus || 'Authorization required'}
                     </strong>
                   </div>
                   <div>
@@ -1707,8 +1725,8 @@ export default function SentinelDashboard() {
                     <span>Analyst</span>
                     <strong>
                       {connection.aiConfigured
-                        ? 'AI provider configured'
-                        : 'Structured analytics'}
+                        ? connection.aiStatus || 'AI provider configured'
+                        : connection.aiStatus || 'Structured analytics'}
                     </strong>
                   </div>
                 </div>
@@ -1766,8 +1784,8 @@ export default function SentinelDashboard() {
                 </div>
                 {!connection.oauthReady && (
                   <p className="connection-note">
-                    Local authorization needs a registered Binance client ID or
-                    publicly reachable HTTPS client metadata.
+                    Binance authorization needs Sentinel to be reachable over
+                    public HTTPS or registered once by the app builder.
                   </p>
                 )}
                 <a
@@ -1912,7 +1930,8 @@ export default function SentinelDashboard() {
           <DialogDescription>
             {connection.aiConfigured
               ? 'AI analyst with market and portfolio context'
-              : 'Structured analytics / AI provider not configured'}
+              : connection.aiStatus ||
+                'Structured analytics / AI provider not configured'}
           </DialogDescription>
           {notice && (
             <p className="notice" role="alert">

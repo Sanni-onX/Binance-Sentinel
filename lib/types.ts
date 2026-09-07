@@ -96,5 +96,8 @@ export interface ConnectionStatus {
   tools: { name: string; description?: string; readOnly: boolean }[];
   error?: string;
   aiConfigured: boolean;
+  aiStatus?: string;
   oauthReady: boolean;
+  oauthMode?: string;
+  oauthStatus?: string;
 }

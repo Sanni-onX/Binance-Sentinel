@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { setting, listRecords, saveRecord } from './store';
+import { listRecords, openAiConfig, saveRecord } from './store';
 import { getMarket } from './market';
 import { marketReport } from './reports';
 import type { DataMode, Portfolio } from './types';
@@ -49,8 +49,7 @@ export async function askAgent(
   );
   let answer: string;
   let engine = 'Structured analytics';
-  const key = setting('OPENAI_API_KEY'),
-    model = setting('OPENAI_MODEL');
+  const { key, model } = openAiConfig();
   if (key && model) {
     const client = new OpenAI({ apiKey: key, timeout: 45000, maxRetries: 0 });
     const context = {

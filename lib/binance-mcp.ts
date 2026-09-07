@@ -12,6 +12,9 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { database, setting, audit } from './store';
 import { HttpError } from './session';
 export const MCP_URL = 'https://agent.binance.com/mcp/agentic';
+const clientMetadataUrlFor = (origin: string) =>
+  setting('BINANCE_CLIENT_METADATA_URL') ||
+  `${origin}/api/binance/client-metadata`;
 interface OAuthData {
   tokens?: OAuthTokens;
   receivedAt?: number;
@@ -101,9 +104,8 @@ export async function provider(sessionId: string, origin: string) {
       .run();
   };
   const callback = `${origin}/api/binance/callback`;
-  const clientMetadataUrl =
-    setting('BINANCE_CLIENT_METADATA_URL') ||
-    `${origin}/api/binance/client-metadata`;
+  const clientMetadataUrl = clientMetadataUrlFor(origin);
+  const configuredClientId = setting('BINANCE_CLIENT_ID');
   const p: OAuthClientProvider = {
     redirectUrl: callback,
     clientMetadataUrl,
@@ -115,9 +117,9 @@ export async function provider(sessionId: string, origin: string) {
       token_endpoint_auth_method: 'none',
     },
     clientInformation: () =>
-      setting('BINANCE_CLIENT_ID')
-        ? { client_id: setting('BINANCE_CLIENT_ID')! }
-        : data.client,
+      configuredClientId
+        ? { client_id: configuredClientId }
+        : data.client || { client_id: clientMetadataUrl },
     saveClientInformation: async (value) => {
       data.client = value;
       await save();

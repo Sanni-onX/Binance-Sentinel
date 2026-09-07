@@ -8,7 +8,14 @@ import {
   readJson,
   trustedOrigin,
 } from '@/lib/session';
-import { audit, database, listRecords, saveRecord, setting } from '@/lib/store';
+import {
+  audit,
+  database,
+  listRecords,
+  openAiConfig,
+  saveRecord,
+  setting,
+} from '@/lib/store';
 import { getMarket, getCandles } from '@/lib/market';
 import { evaluateStrategy, strategySchema } from '@/lib/strategy';
 import {
@@ -34,6 +41,29 @@ const symbolsFromBody = (body: unknown) =>
     .object({ symbols: z.array(z.string()).max(8).optional() })
     .loose()
     .parse(body).symbols;
+const binanceMetadataUrl = (origin: string) =>
+  setting('BINANCE_CLIENT_METADATA_URL') ||
+  `${origin}/api/binance/client-metadata`;
+const binanceOAuthStatus = (origin: string) => {
+  if (setting('BINANCE_CLIENT_ID'))
+    return {
+      ready: true,
+      mode: 'registered_client',
+      label: 'Registered client ID',
+    };
+  const metadataUrl = binanceMetadataUrl(origin);
+  if (metadataUrl.startsWith('https:'))
+    return {
+      ready: true,
+      mode: 'public_metadata',
+      label: 'Public metadata URL',
+    };
+  return {
+    ready: false,
+    mode: 'local_only',
+    label: 'Needs public HTTPS metadata',
+  };
+};
 const route = (req: Request) =>
   new URL(req.url).pathname.replace(/^\/api\//, '').replace(/\/$/, '');
 export async function GET(request: Request) {
@@ -43,10 +73,9 @@ export async function GET(request: Request) {
     if (path === 'health') return json({ status: 'ok', service: 'sentinel' });
     if (path === 'binance/client-metadata') {
       const origin = trustedOrigin(request);
+      const metadataUrl = binanceMetadataUrl(origin);
       return json({
-        client_id:
-          setting('BINANCE_CLIENT_METADATA_URL') ||
-          `${origin}/api/binance/client-metadata`,
+        client_id: metadataUrl,
         client_name: 'Sentinel',
         redirect_uris: [`${origin}/api/binance/callback`],
         grant_types: ['authorization_code'],
@@ -55,22 +84,23 @@ export async function GET(request: Request) {
       });
     }
     const session = await getSession(request, true);
-    if (path === 'session')
+    if (path === 'session') {
+      const ai = openAiConfig(),
+        origin = trustedOrigin(request),
+        binanceOAuth = binanceOAuthStatus(origin);
       return json(
         {
-          aiConfigured: Boolean(
-            setting('OPENAI_API_KEY') && setting('OPENAI_MODEL'),
-          ),
+          aiConfigured: ai.configured,
+          aiStatus: ai.status,
           tradingEnabled: setting('ENABLE_LIVE_TRADING') === 'true',
-          oauthReady: Boolean(
-            setting('BINANCE_CLIENT_ID') ||
-            setting('BINANCE_CLIENT_METADATA_URL')?.startsWith('https:') ||
-            trustedOrigin(request).startsWith('https:'),
-          ),
+          oauthReady: binanceOAuth.ready,
+          oauthMode: binanceOAuth.mode,
+          oauthStatus: binanceOAuth.label,
         },
         200,
         session.cookie,
       );
+    }
     if (path === 'market')
       return json(
         await getMarket(
