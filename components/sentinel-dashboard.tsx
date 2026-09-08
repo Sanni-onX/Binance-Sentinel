@@ -95,6 +95,12 @@ const colors = [
 const DEFAULT_TRACKED_SYMBOLS = ['BTCUSDT', 'BNBUSDT'];
 const MAX_TRACKED_SYMBOLS = 8;
 const pairLabel = (symbol: string) => symbol.replace(/USDT$/, '');
+function isBinanceHttpsUrl(url: URL) {
+  return (
+    url.protocol === 'https:' &&
+    (url.hostname === 'binance.com' || url.hostname.endsWith('.binance.com'))
+  );
+}
 function normalizePair(input: string) {
   const pair = input.trim().toUpperCase();
   if (!pair) return '';
@@ -455,10 +461,7 @@ export default function SentinelDashboard() {
     await task('connect', async () => {
       const result = await api<{ url: string }>('binance/connect', {});
       const url = new URL(result.url);
-      if (
-        url.hostname !== 'accounts.binance.com' &&
-        url.origin !== window.location.origin
-      )
+      if (!isBinanceHttpsUrl(url) && url.origin !== window.location.origin)
         throw new Error('Unexpected authorization URL.');
       window.location.assign(url.href);
     });

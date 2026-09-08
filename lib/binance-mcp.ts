@@ -75,6 +75,12 @@ export async function hasToken(sessionId: string) {
       Date.now() < (data.receivedAt || 0) + data.tokens.expires_in * 1000),
   );
 }
+function isBinanceHttpsUrl(url: URL) {
+  return (
+    url.protocol === 'https:' &&
+    (url.hostname === 'binance.com' || url.hostname.endsWith('.binance.com'))
+  );
+}
 const safeFetch: typeof fetch = async (input, init) => {
   const url = new URL(
     typeof input === 'string'
@@ -83,10 +89,7 @@ const safeFetch: typeof fetch = async (input, init) => {
         ? input.href
         : input.url,
   );
-  if (
-    url.protocol !== 'https:' ||
-    !(url.hostname === 'binance.com' || url.hostname.endsWith('.binance.com'))
-  )
+  if (!isBinanceHttpsUrl(url))
     throw new Error('Unexpected OAuth destination blocked.');
   return fetch(input, {
     ...init,
@@ -147,7 +150,7 @@ export async function provider(sessionId: string, origin: string) {
       return state;
     },
     redirectToAuthorization: (url) => {
-      if (url.hostname !== 'accounts.binance.com')
+      if (!isBinanceHttpsUrl(url))
         throw new Error('Unexpected authorization destination.');
       redirect = url.href;
     },
