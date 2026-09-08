@@ -29,6 +29,25 @@ wranglerConfig.assets = { directory: '../client' };
 wranglerConfig.compatibility_flags = Array.from(
   new Set(wranglerConfig.compatibility_flags || []),
 );
+const workerVarNames = [
+  'APP_ORIGIN',
+  'BINANCE_CLIENT_ID',
+  'BINANCE_CLIENT_METADATA_URL',
+  'ENABLE_LIVE_TRADING',
+  'LLM_MODEL',
+  'MAX_ORDER_USDT',
+  'MODEL',
+  'OPENAI_API_KEY',
+  'OPENAI_API_MODEL',
+  'OPENAI_KEY',
+  'OPENAI_MODEL',
+  'OPENAI_RESPONSES_MODEL',
+  'TOKEN_ENCRYPTION_KEY',
+];
+wranglerConfig.vars = { ...wranglerConfig.vars };
+for (const name of workerVarNames) {
+  if (process.env[name]) wranglerConfig.vars[name] = process.env[name];
+}
 const d1ByName = new Map();
 for (const binding of wranglerConfig.d1_databases || []) {
   const existing = d1ByName.get(binding.binding);
