@@ -118,14 +118,32 @@ function loadTrackedSymbols() {
   }
 }
 async function api<T>(path: string, body?: unknown): Promise<T> {
-  const response = await fetch(`/api/${path}`, {
-    method: body === undefined ? 'GET' : 'POST',
-    headers:
-      body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(60000),
-  });
-  const result = await response.json();
+  let response: Response;
+  try {
+    response = await fetch(`/api/${path}`, {
+      method: body === undefined ? 'GET' : 'POST',
+      credentials: 'same-origin',
+      headers:
+        body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(60000),
+    });
+  } catch (error) {
+    throw new Error(
+      error instanceof Error && error.name === 'TimeoutError'
+        ? 'Sentinel API timed out. Check the Railway deployment logs and retry.'
+        : 'Sentinel API is unreachable. Confirm the Railway deployment is running and APP_ORIGIN matches this domain.',
+    );
+  }
+  const text = await response.text();
+  let result: unknown;
+  try {
+    result = JSON.parse(text);
+  } catch {
+    if (!response.ok)
+      throw new Error(text || `Sentinel API returned HTTP ${response.status}.`);
+    throw new Error('Sentinel API returned an unexpected non-JSON response.');
+  }
   if (!response.ok)
     throw new Error((result as { error?: string }).error || 'Request failed.');
   return result as T;

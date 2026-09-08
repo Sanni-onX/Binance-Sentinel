@@ -2,13 +2,17 @@ import assert from 'node:assert/strict';
 const origin = process.env.TEST_ORIGIN || 'http://localhost:3001';
 let cookie = '';
 async function request(path, body, options = {}) {
+  const mutationHeaders =
+    body === undefined
+      ? {}
+      : options.omitOrigin
+        ? { 'content-type': 'application/json' }
+        : { origin, 'content-type': 'application/json' };
   const r = await fetch(`${origin}/api/${path}`, {
     method: body === undefined ? 'GET' : 'POST',
     headers: {
       ...(cookie ? { cookie } : {}),
-      ...(body === undefined
-        ? {}
-        : { origin, 'content-type': 'application/json' }),
+      ...mutationHeaders,
       ...options.headers,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -117,6 +121,17 @@ const forwarded = await request(
   },
 );
 assert.equal(forwarded.r.status, 200);
+const secFetchFallback = await request(
+  'reports/generate',
+  { mode: 'demo' },
+  {
+    omitOrigin: true,
+    headers: {
+      'sec-fetch-site': 'same-origin',
+    },
+  },
+);
+assert.equal(secFetchFallback.r.status, 200);
 const csrf = await request(
   'reports/generate',
   { mode: 'demo' },

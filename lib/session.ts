@@ -46,7 +46,10 @@ export function checkMutation(request: Request) {
     requestOrigin(request),
     current.origin,
   ]);
-  if (!origin || !allowed.has(origin))
+  const fetchSite = request.headers.get('sec-fetch-site');
+  const sameSiteBrowserRequest =
+    !origin && (fetchSite === 'same-origin' || fetchSite === 'same-site');
+  if (!sameSiteBrowserRequest && (!origin || !allowed.has(origin)))
     throw new HttpError(403, 'Request origin is not allowed.');
   if (!request.headers.get('content-type')?.startsWith('application/json'))
     throw new HttpError(415, 'JSON requests are required.');
