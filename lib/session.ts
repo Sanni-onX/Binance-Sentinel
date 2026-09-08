@@ -32,15 +32,21 @@ export function trustedOrigin(request: Request) {
   const origin = configuredOrigin();
   const current = new URL(request.url);
   if (origin) return origin;
-  if (['localhost', '127.0.0.1'].includes(current.hostname))
-    return current.origin;
   const inferred = requestOrigin(request);
   if (inferred.startsWith('https://')) return inferred;
+  if (['localhost', '127.0.0.1'].includes(current.hostname))
+    return current.origin;
   throw new HttpError(503, 'Set APP_ORIGIN to the deployed app origin.');
 }
 export function checkMutation(request: Request) {
   const origin = request.headers.get('origin');
-  if (origin !== trustedOrigin(request))
+  const current = new URL(request.url);
+  const allowed = new Set([
+    trustedOrigin(request),
+    requestOrigin(request),
+    current.origin,
+  ]);
+  if (!origin || !allowed.has(origin))
     throw new HttpError(403, 'Request origin is not allowed.');
   if (!request.headers.get('content-type')?.startsWith('application/json'))
     throw new HttpError(415, 'JSON requests are required.');

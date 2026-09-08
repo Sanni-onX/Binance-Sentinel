@@ -105,6 +105,18 @@ assert.match(report.data.body, /Synthetic sample/);
 const reports = await request('reports');
 assert.ok(reports.data.some((r) => r.id === report.data.id));
 console.log('PASS report generation and persistence');
+const forwarded = await request(
+  'reports/generate',
+  { mode: 'demo' },
+  {
+    headers: {
+      origin: 'https://sentinel-test.up.railway.app',
+      'x-forwarded-proto': 'https',
+      'x-forwarded-host': 'sentinel-test.up.railway.app',
+    },
+  },
+);
+assert.equal(forwarded.r.status, 200);
 const csrf = await request(
   'reports/generate',
   { mode: 'demo' },
