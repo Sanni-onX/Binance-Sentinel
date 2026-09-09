@@ -11,12 +11,14 @@
     "postbuild": "node scripts/verify-artifact.mjs",
     "start": "wrangler dev --config dist/server/wrangler.json",
     "start:railway": "node scripts/railway-start.mjs",
+    "mcp": "tsx scripts/sentinel-mcp.ts",
     "lint": "oxlint",
     "format": "oxfmt",
     "db:generate": "drizzle-kit generate",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
     "test:api": "node scripts/test-api.mjs",
+    "test:mcp": "node scripts/test-mcp.mjs",
     "setup:local": "node scripts/setup-local.mjs"
   },
   "dependencies": {

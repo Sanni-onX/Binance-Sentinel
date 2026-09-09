@@ -25,6 +25,7 @@ Open the local URL printed by the server. The server chooses another port if occ
 - Analyst: grounded OpenAI Responses API conversation when configured; clearly labeled structured analytics otherwise. The model has no execution tools.
 - Agent OS: OAuth 2.1/PKCE client, encrypted token storage, MCP discovery, account connection verification and an activity ledger.
 - Orders: bounded spot BUY proposals, explicit confirmation, expiry, exact decimal risk checks, single-use submission and no automatic retries after an ambiguous result. Live trading is disabled by default.
+- MCP mode: a local stdio MCP server exposes Sentinel market snapshots, reports, analyst answers, strategy development, strategy evaluation and order risk checks directly to MCP-capable clients.
 
 Sample mode is synthetic and is explicitly selected; a failed live request never silently becomes a sample result. Sample runs do not establish Track B trade eligibility.
 
@@ -56,6 +57,39 @@ Confirmation rechecks balances and rejects a reference-price move over 0.5%. Thi
 
 Limits apply to this app's session and observed account snapshot. Other clients can change the same account independently. Keep one active execution session. There is no withdrawal, margin, futures, payment or onchain execution in this version.
 
+## Sentinel MCP server
+
+Use the MCP server when the web OAuth flow is unavailable and you want to operate Sentinel directly from an MCP-capable client such as Codex or a ChatGPT app that supports local MCP connectors.
+
+The server is stdio-based. Configure the client to run this command from the project root:
+
+```sh
+node node_modules/tsx/dist/cli.mjs scripts/sentinel-mcp.ts
+```
+
+Do not put `npm run mcp` in a stdio MCP client config unless that client explicitly tolerates npm wrapper output. The package script is convenient for manual launching:
+
+```sh
+npm run mcp
+```
+
+Available tools:
+
+- `sentinel_market_snapshot`: live or demo indicators for tracked USDT pairs.
+- `sentinel_market_report`: conservative market and optional portfolio report.
+- `sentinel_analyst`: grounded analyst response using retrieved market evidence and optional supplied portfolio data. Uses `OPENAI_API_KEY` and `OPENAI_MODEL` when present, otherwise returns structured analytics.
+- `sentinel_evaluate_strategy`: backtests one supplied rule set.
+- `sentinel_develop_strategy`: develops and validates a conservative long-only spot setup with entry, stop, target, sizing and wait/buy-setup decision.
+- `sentinel_order_guard`: read-only risk check for a proposed BUY before using a separate Binance execution tool.
+- `sentinel_binance_mcp_instructions`: explains how to pair Sentinel MCP with the official Binance MCP endpoint.
+
+Recommended pairing:
+
+1. Connect this Sentinel MCP for analysis and strategy work.
+2. Connect Binance's official MCP endpoint for account authorization and balance/order tools: `https://agent.binance.com/mcp/agentic`.
+3. Ask Sentinel to analyze, develop a setup, and run `sentinel_order_guard`.
+4. Use Binance MCP only for reviewed account reads or actions. Sentinel MCP itself never places trades.
+
 ## Data and architecture
 
 - React / TypeScript, Vinext, Cloudflare-compatible server routes, D1 SQLite.
@@ -73,6 +107,7 @@ Limits apply to this app's session and observed account snapshot. Other clients 
 npm run typecheck
 npm test
 npm run test:api
+npm run test:mcp
 npm run build
 ```
 
