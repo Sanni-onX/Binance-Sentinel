@@ -153,6 +153,7 @@ export async function provider(sessionId: string, origin: string) {
     redirectToAuthorization: (url) => {
       if (!isBinanceHttpsUrl(url))
         throw new Error('Unexpected authorization destination.');
+      url.searchParams.set('resource', MCP_URL);
       redirect = url.href;
     },
     saveCodeVerifier: async (verifier) => {
