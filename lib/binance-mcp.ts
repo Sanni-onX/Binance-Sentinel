@@ -112,6 +112,7 @@ export async function provider(sessionId: string, origin: string) {
   const p: OAuthClientProvider = {
     redirectUrl: callback,
     clientMetadataUrl,
+    validateResourceURL: async () => new URL(MCP_URL),
     clientMetadata: {
       client_name: 'Sentinel',
       redirect_uris: [callback],
